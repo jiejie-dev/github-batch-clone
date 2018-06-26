@@ -1,9 +1,10 @@
+// Copied and Edited from https://github.com/yinheli/mirror_mygithub/blob/master/mirror_mygithub.go
+// thanks https://github.com/yinheli
 package main
 
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,15 +15,25 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"github.com/alecthomas/kingpin"
 )
 
-var (
+const (
 	github_api = "https://api.github.com"
 
 	starred_uri    = "/user/starred"
 	user_repos_uri = "/user/repos"
+)
 
-	configFile = flag.String("f", "config.json", "config file")
+var (
+	app         = kingpin.New("github-batch-clone", "A command line tool to batch clone github reps.")
+	userName    = app.Flag("username", "Github username.").String()
+	rootDir     = app.Flag("target_root_dir", "Target dir to save.").Default("./").String()
+	token       = app.Flag("token", "The github api token.").String()
+	myreps      = app.Flag("myreps", "Clone my reps.").Default("1").Bool()
+	starredReps = app.Flag("starredReps", "Clone starred reps.").Default("0").Bool()
+
+	clone = app.Command("clone", "Start clone.")
 
 	cfg Config
 
@@ -45,24 +56,19 @@ type Config struct {
 }
 
 func main() {
-	flag.Parse()
-	if !flag.Parsed() {
-		flag.Usage()
-		return
+	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
+	// Register user
+	case clone.FullCommand():
+		startClone()
+	default:
+		kingpin.Usage()
 	}
+}
 
-	cf, err := os.OpenFile(*configFile, os.O_RDONLY, 0x600)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	content, _ := ioutil.ReadAll(cf)
-	err = json.Unmarshal(content, &cfg)
-	if err != nil {
-		fmt.Printf("parse config file failed, msg: %v", err)
-		return
-	}
+func startClone() {
+	cfg.User = *userName
+	cfg.Token = *token
+	cfg.RepoRootDir = *rootDir
 
 	if cfg.User == "" || cfg.Token == "" {
 		fmt.Println("config.json, user and token can't empty")
@@ -81,11 +87,14 @@ func main() {
 
 	os.Chdir(cfg.RepoRootDir)
 
-	syncRepos(fmt.Sprintf("%v/users", cfg.RepoRootDir), user_repos_uri)
-	syncRepos(fmt.Sprintf("%v/starred", cfg.RepoRootDir), starred_uri)
+	if *myreps {
+		syncRepos(fmt.Sprintf("%v/users", cfg.RepoRootDir), user_repos_uri)
+	}
+	if *starredReps {
+		syncRepos(fmt.Sprintf("%v/starred", cfg.RepoRootDir), starred_uri)
+	}
 
 	lg.Println("finished")
-
 }
 
 func fetchApiContent(uri string) (reps []Repo) {
